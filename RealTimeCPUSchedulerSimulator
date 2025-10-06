@@ -1,0 +1,403 @@
+import javax.swing.*;
+import javax.swing.border.TitledBorder;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.stream.Collectors;
+
+/**
+ * A Java Swing application to simulate real-time CPU scheduling algorithms:
+ * - Rate Monotonic Scheduling (RMS) [cite: 48]
+ * - Earliest Deadline First (EDF) [cite: 49]
+ * - Least Laxity First (LLF) [cite: 64]
+ * <p>
+ * This simulator is based on the concepts presented in the user-provided document.
+ */
+public class RealTimeSchedulerSimulator extends JFrame {
+
+    // --- UI Components ---
+    private final DefaultTableModel taskTableModel;
+    private final JTable taskTable;
+    private final JComboBox<String> algorithmComboBox;
+    private final JSpinner simulationTimeSpinner;
+    private final JTextArea logArea;
+    private final JPanel ganttChartPanel;
+    private final JLabel statsLabel;
+
+    // --- Main Constructor ---
+    public RealTimeSchedulerSimulator() {
+        super("Real-Time CPU Scheduling Simulator");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(1200, 800);
+        setLocationRelativeTo(null);
+        setLayout(new BorderLayout(10, 10));
+
+        // --- Setup Panels ---
+        JPanel controlPanel = new JPanel(new BorderLayout());
+        JPanel inputPanel = createTaskInputPanel();
+        JPanel simulationControlPanel = createSimulationControlPanel();
+        
+        controlPanel.add(inputPanel, BorderLayout.NORTH);
+        controlPanel.add(simulationControlPanel, BorderLayout.SOUTH);
+
+        JPanel resultsPanel = new JPanel(new BorderLayout(10, 10));
+        logArea = new JTextArea();
+        logArea.setEditable(false);
+        JScrollPane logScrollPane = new JScrollPane(logArea);
+        logScrollPane.setBorder(new TitledBorder("Simulation Log"));
+
+        ganttChartPanel = new JPanel();
+        ganttChartPanel.setLayout(new GridLayout(1, 0, 0, 0));
+        JScrollPane ganttScrollPane = new JScrollPane(ganttChartPanel);
+        ganttScrollPane.setBorder(new TitledBorder("Gantt Chart Timeline"));
+        
+        statsLabel = new JLabel("Status: Idle");
+        statsLabel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+
+        JSplitPane mainSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, ganttScrollPane, logScrollPane);
+        mainSplitPane.setResizeWeight(0.3);
+
+        resultsPanel.add(mainSplitPane, BorderLayout.CENTER);
+        resultsPanel.add(statsLabel, BorderLayout.SOUTH);
+        
+        // --- Table Model Setup ---
+        String[] columnNames = {"Task ID", "Execution Time", "Period (Deadline)"};
+        taskTableModel = new DefaultTableModel(columnNames, 0);
+        taskTable = new JTable(taskTableModel);
+
+        // --- Add components to the frame ---
+        add(controlPanel, BorderLayout.NORTH);
+        add(new JScrollPane(taskTable), BorderLayout.WEST);
+        add(resultsPanel, BorderLayout.CENTER);
+
+        // --- Algorithm ComboBox Setup ---
+        algorithmComboBox = new JComboBox<>(new String[]{"Rate Monotonic (RMS)", "Earliest Deadline First (EDF)", "Least Laxity First (LLF)"});
+        simulationTimeSpinner = new JSpinner(new SpinnerNumberModel(50, 1, 500, 1));
+        
+        simulationControlPanel.add(new JLabel("Algorithm:"));
+        simulationControlPanel.add(algorithmComboBox);
+        simulationControlPanel.add(new JLabel("Sim Time:"));
+        simulationControlPanel.add(simulationTimeSpinner);
+
+        // Pre-populate with case study data [cite: 67, 68, 69]
+        addTask("T1", 1, 4);
+        addTask("T2", 2, 5);
+        addTask("T3", 5, 20);
+    }
+
+    /**
+     * Creates the panel for adding/removing tasks.
+     */
+    private JPanel createTaskInputPanel() {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        panel.setBorder(new TitledBorder("Task Management"));
+
+        JTextField idField = new JTextField("T4", 3);
+        JTextField execTimeField = new JTextField("2", 3);
+        JTextField periodField = new JTextField("10", 3);
+        JButton addButton = new JButton("Add Task");
+        JButton removeButton = new JButton("Remove Selected");
+
+        addButton.addActionListener(e -> {
+            try {
+                String id = idField.getText();
+                int execTime = Integer.parseInt(execTimeField.getText());
+                int period = Integer.parseInt(periodField.getText());
+                if (execTime > 0 && period > 0 && execTime <= period) {
+                    addTask(id, execTime, period);
+                } else {
+                    JOptionPane.showMessageDialog(this, "Execution time must be positive and not exceed the period.", "Input Error", JOptionPane.ERROR_MESSAGE);
+                }
+            } catch (NumberFormatException ex) {
+                JOptionPane.showMessageDialog(this, "Please enter valid integers for time and period.", "Input Error", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        removeButton.addActionListener(e -> {
+            int selectedRow = taskTable.getSelectedRow();
+            if (selectedRow >= 0) {
+                taskTableModel.removeRow(selectedRow);
+            } else {
+                 JOptionPane.showMessageDialog(this, "Please select a task to remove.", "Selection Error", JOptionPane.WARNING_MESSAGE);
+            }
+        });
+
+        panel.add(new JLabel("ID:"));
+        panel.add(idField);
+        panel.add(new JLabel("Exec Time:"));
+        panel.add(execTimeField);
+        panel.add(new JLabel("Period:"));
+        panel.add(periodField);
+        panel.add(addButton);
+        panel.add(removeButton);
+        return panel;
+    }
+
+    /**
+     * Creates the panel for simulation controls.
+     */
+    private JPanel createSimulationControlPanel() {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        panel.setBorder(new TitledBorder("Simulation Controls"));
+        JButton runButton = new JButton("Run Simulation");
+        JButton resetButton = new JButton("Reset");
+        
+        runButton.addActionListener(e -> runSimulation());
+        resetButton.addActionListener(e -> resetSimulation());
+
+        panel.add(runButton);
+        panel.add(resetButton);
+        return panel;
+    }
+
+    /**
+     * Helper to add a task to the table model.
+     */
+    private void addTask(String id, int execTime, int period) {
+        taskTableModel.addRow(new Object[]{id, execTime, period});
+    }
+
+    /**
+     * Resets the simulation view.
+     */
+    private void resetSimulation() {
+        logArea.setText("");
+        ganttChartPanel.removeAll();
+        ganttChartPanel.revalidate();
+        ganttChartPanel.repaint();
+        statsLabel.setText("Status: Idle");
+    }
+
+    /**
+     * Main simulation logic. Runs in a separate thread to keep the UI responsive.
+     */
+    private void runSimulation() {
+        resetSimulation();
+        List<Task> tasks = getTasksFromTable();
+        if (tasks.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Please add at least one task.", "Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        // Calculate total utilization
+        double totalUtilization = tasks.stream().mapToDouble(t -> (double) t.execTime / t.period).sum();
+        log("System CPU Utilization: " + String.format("%.2f%%", totalUtilization * 100));
+
+        String selectedAlgorithm = (String) algorithmComboBox.getSelectedItem();
+        int simulationTime = (int) simulationTimeSpinner.getValue();
+
+        // Run simulation in a background thread
+        new SwingWorker<Void, String>() {
+            @Override
+            protected Void doInBackground() {
+                simulate(tasks, selectedAlgorithm, simulationTime);
+                return null;
+            }
+        }.execute();
+    }
+    
+    /**
+     * The core simulation loop.
+     */
+    private void simulate(List<Task> initialTasks, String algorithm, int simulationTime) {
+        log("Starting simulation with " + algorithm + " for " + simulationTime + " time units.");
+
+        List<TaskInstance> readyQueue = new ArrayList<>();
+        int time = 0;
+        int deadlinesMissed = 0;
+        int cpuIdleTime = 0;
+        
+        // Assign static priorities for RMS
+        if (algorithm.equals("Rate Monotonic (RMS)")) {
+            initialTasks.sort(Comparator.comparingInt(t -> t.period)); // Shorter period = higher priority [cite: 41]
+            for (int i = 0; i < initialTasks.size(); i++) {
+                initialTasks.get(i).staticPriority = i;
+            }
+        }
+        
+        while (time < simulationTime) {
+            final int currentTime = time;
+            
+            // Add new task instances that arrive at the current time
+            for (Task task : initialTasks) {
+                if (currentTime % task.period == 0) {
+                    readyQueue.add(new TaskInstance(task, currentTime));
+                    log(String.format("Time %d: Task %s arrived. Deadline is %d.", currentTime, task.id, currentTime + task.period));
+                }
+            }
+
+            // Check for missed deadlines from the previous cycle
+            List<TaskInstance> completedOrMissed = new ArrayList<>();
+            for (TaskInstance ti : readyQueue) {
+                if (ti.deadline == currentTime && ti.remainingTime > 0) {
+                    deadlinesMissed++;
+                    log(String.format("!!! DEADLINE MISS !!! Time %d: Task %s missed its deadline.", currentTime, ti.task.id));
+                    completedOrMissed.add(ti);
+                }
+            }
+            readyQueue.removeAll(completedOrMissed);
+            
+            // --- Scheduling Logic ---
+            TaskInstance taskToRun = null;
+            if (!readyQueue.isEmpty()) {
+                switch (algorithm) {
+                    case "Rate Monotonic (RMS)":
+                        // Highest static priority (lowest number)
+                        taskToRun = readyQueue.stream().min(Comparator.comparingInt(ti -> ti.task.staticPriority)).orElse(null);
+                        break;
+                    case "Earliest Deadline First (EDF)":
+                        // Task with the closest deadline runs [cite: 51]
+                        taskToRun = readyQueue.stream().min(Comparator.comparingInt(ti -> ti.deadline)).orElse(null);
+                        break;
+                    case "Least Laxity First (LLF)":
+                        // Task with the minimum slack time runs [cite: 59]
+                        for (TaskInstance ti : readyQueue) {
+                            ti.calculateLaxity(currentTime);
+                        }
+                        taskToRun = readyQueue.stream()
+                                            .filter(ti -> ti.laxity >= 0)
+                                            .min(Comparator.comparingInt(ti -> ti.laxity))
+                                            .orElse(null);
+                        break;
+                }
+            }
+
+            // --- Execute and Update State ---
+            if (taskToRun != null) {
+                log(String.format("Time %d: Executing Task %s. (Remaining: %d)", currentTime, taskToRun.task.id, taskToRun.remainingTime - 1));
+                taskToRun.remainingTime--;
+                updateGanttChart(currentTime, taskToRun.task);
+                if (taskToRun.remainingTime == 0) {
+                    log(String.format("Time %d: Task %s finished execution.", currentTime + 1, taskToRun.task.id));
+                    readyQueue.remove(taskToRun);
+                }
+            } else {
+                log(String.format("Time %d: CPU is idle.", currentTime));
+                cpuIdleTime++;
+                updateGanttChart(currentTime, null); // null represents idle
+            }
+            
+            time++;
+        }
+        
+        final int finalDeadlinesMissed = deadlinesMissed;
+        final int finalCpuIdleTime = cpuIdleTime;
+        SwingUtilities.invokeLater(() -> {
+            statsLabel.setText(String.format("Simulation Finished. Total Time: %d, Deadlines Missed: %d, CPU Idle Time: %d", simulationTime, finalDeadlinesMissed, finalCpuIdleTime));
+        });
+    }
+
+    /**
+     * Appends a message to the log area on the UI thread.
+     */
+    private void log(String message) {
+        SwingUtilities.invokeLater(() -> logArea.append(message + "\n"));
+    }
+    
+    /**
+     * Updates the Gantt chart on the UI thread.
+     */
+    private void updateGanttChart(int time, Task task) {
+        SwingUtilities.invokeLater(() -> {
+            JPanel timeSlot = new JPanel(new BorderLayout());
+            timeSlot.setBorder(BorderFactory.createLineBorder(Color.BLACK));
+            
+            JLabel timeLabel = new JLabel(String.valueOf(time));
+            timeLabel.setHorizontalAlignment(SwingConstants.CENTER);
+            
+            if (task != null) {
+                timeSlot.setBackground(task.color);
+                JLabel taskLabel = new JLabel(task.id);
+                taskLabel.setForeground(getContrastColor(task.color));
+                taskLabel.setHorizontalAlignment(SwingConstants.CENTER);
+                timeSlot.add(taskLabel, BorderLayout.CENTER);
+            } else {
+                timeSlot.setBackground(Color.LIGHT_GRAY);
+                 JLabel taskLabel = new JLabel("Idle");
+                taskLabel.setHorizontalAlignment(SwingConstants.CENTER);
+                timeSlot.add(taskLabel, BorderLayout.CENTER);
+            }
+
+            timeSlot.add(timeLabel, BorderLayout.SOUTH);
+            ganttChartPanel.add(timeSlot);
+            ganttChartPanel.revalidate();
+            ganttChartPanel.repaint();
+        });
+    }
+    
+    /**
+     * Gets a contrasting color (black or white) for text on a colored background.
+     */
+    private Color getContrastColor(Color color) {
+        double y = (299 * color.getRed() + 587 * color.getGreen() + 114 * color.getBlue()) / 1000.0;
+        return y >= 128 ? Color.BLACK : Color.WHITE;
+    }
+    
+    /**
+     * Reads task definitions from the UI table.
+     */
+    private List<Task> getTasksFromTable() {
+        List<Task> tasks = new ArrayList<>();
+        Color[] colors = {Color.decode("#4E79A7"), Color.decode("#F28E2B"), Color.decode("#E15759"), Color.decode("#76B7B2"), Color.decode("#59A14F"), Color.decode("#EDC948"), Color.decode("#B07AA1")};
+        for (int i = 0; i < taskTableModel.getRowCount(); i++) {
+            String id = (String) taskTableModel.getValueAt(i, 0);
+            int execTime = (Integer) taskTableModel.getValueAt(i, 1);
+            int period = (Integer) taskTableModel.getValueAt(i, 2);
+            tasks.add(new Task(id, execTime, period, colors[i % colors.length]));
+        }
+        return tasks;
+    }
+
+    // --- Data Holder Classes ---
+    
+    /**
+     * Represents a task template.
+     */
+    private static class Task {
+        final String id;
+        final int execTime;
+        final int period;
+        final Color color;
+        int staticPriority = -1; // Used for RMS
+
+        Task(String id, int execTime, int period, Color color) {
+            this.id = id;
+            this.execTime = execTime; // Ei from the presentation [cite: 84]
+            this.period = period;     // Di from the presentation [cite: 85]
+            this.color = color;
+        }
+    }
+
+    /**
+     * Represents an active instance of a task in the ready queue.
+     */
+    private static class TaskInstance {
+        final Task task;
+        final int deadline;
+        int remainingTime;
+        int laxity;
+
+        TaskInstance(Task task, int arrivalTime) {
+            this.task = task;
+            this.remainingTime = task.execTime;
+            this.deadline = arrivalTime + task.period;
+        }
+
+        /**
+         * Calculates slack time (laxity) as per the LLF algorithm. [cite: 57, 58]
+         * Formula: Laxity = (Deadline - CurrentTime) - RemainingExecutionTime
+         */
+        void calculateLaxity(int currentTime) {
+            this.laxity = (this.deadline - currentTime) - this.remainingTime;
+        }
+    }
+    
+    // --- Main Method ---
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> {
+            new RealTimeSchedulerSimulator().setVisible(true);
+        });
+    }
+}
